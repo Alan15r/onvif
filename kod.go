@@ -10,7 +10,10 @@ import (
 
 func main() {
 	//создаем девайс(камеру) и подключаемся к ней
-	device, _ := onvif.NewDevice(onvif.DeviceParams{Xaddr: "172.22.226.8:10080"})
+	device, err := onvif.NewDevice(onvif.DeviceParams{Xaddr: "172.22.226.8:10080"})
+	if err != nil {
+		panic(err)
+	}
 
 	//ptz
 	//device
