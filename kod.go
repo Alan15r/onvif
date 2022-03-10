@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/use-go/onvif"
+	"github.com/use-go/onvif/media"
 	"github.com/yakovlevdmv/goonvif/Media"
 	onv "github.com/yakovlevdmv/goonvif/xsd/onvif"
 )
@@ -18,18 +19,8 @@ type Envelope struct {
 }
 
 type Body struct {
-	GetProfilesResponse GetProfilesResponse `xml:"GetProfilesResponse"`
+	GetProfilesResponse media.GetProfilesResponse `xml:"GetProfilesResponse"`
 }
-
-type GetProfilesResponse struct {
-	Profiles []Profile `xml:"Profiles"`
-}
-
-type Profile struct {
-	Name string `xml:"Name"`
-}
-
-//
 
 type EnvelopeShot struct {
 	XMLName xml.Name `xml:"Envelope"`
@@ -37,15 +28,7 @@ type EnvelopeShot struct {
 }
 
 type BodyShot struct {
-	GetSnapshotUriResponse GetSnapshotUriResponse `xml:"GetSnapshotUriResponse"`
-}
-
-type GetSnapshotUriResponse struct {
-	MediaUri MediaUri `xml:"MediaUri"`
-}
-
-type MediaUri struct {
-	Uri string `xml:"Uri"`
+	GetSnapshotUriResponse media.GetSnapshotUriResponse `xml:"GetSnapshotUriResponse"`
 }
 
 func main() {
@@ -57,62 +40,88 @@ func main() {
 	}
 
 	//получаем профили
-	getProf := Media.GetProfiles{}
-	resp, err := device.CallMethod(getProf)
+	getProf, err := GetProfiles(device)
 	if err != nil {
-		log.Println("ERROR.0", err.Error())
+		log.Fatal("error get profiles: ", err.Error())
+	}
+	profiles := getProf.Profiles
+
+	profToken := string(profiles[0].Name)
+	refToken := onv.ReferenceToken(profToken)
+
+	//получаем uri для снимка
+	uri, err := GetUri(device, refToken)
+	if err != nil {
+		log.Fatal("error get uri: ", err.Error())
+	}
+
+	//переделываем адрес
+	url := remake(uri, xaddr)
+
+	//запрашиваем кадр
+	shot, err := GetShot(url)
+	if err != nil {
+		log.Fatal("error get shot: ", err.Error())
+	}
+
+	fmt.Println(shot)
+}
+
+func GetShot(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatal("ERROR2: ", err.Error())
+		return nil, err
+	}
+
+	return body, nil
+}
+
+func GetUri(device *onvif.Device, refToken onv.ReferenceToken) (string, error) {
+	getUri := Media.GetSnapshotUri{ProfileToken: refToken}
+	resp, err := device.CallMethod(getUri)
+	if err != nil {
+		return "", err
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var res EnvelopeShot
+	err = xml.Unmarshal(body, &res)
+	if err != nil {
+		return "", err
+	}
+
+	uri := string(res.Body.GetSnapshotUriResponse.MediaUri.Uri)
+	return uri, nil
+}
+
+func GetProfiles(device *onvif.Device) (media.GetProfilesResponse, error) {
+	getProf := Media.GetProfiles{}
+	resp, err := device.CallMethod(getProf)
+	if err != nil {
+		return media.GetProfilesResponse{}, err
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return media.GetProfilesResponse{}, err
 	}
 
 	var res Envelope
 	err = xml.Unmarshal(body, &res)
 	if err != nil {
-		panic(err)
+		return media.GetProfilesResponse{}, err
 	}
 
-	profToken := res.Body.GetProfilesResponse.Profiles[0].Name
-	refToken := onv.ReferenceToken(profToken)
-
-	//получаем uri для снимка
-	getUri := Media.GetSnapshotUri{ProfileToken: refToken}
-	resp2, err := device.CallMethod(getUri)
-	if err != nil {
-		log.Fatal("ERROR resp2: ", err.Error())
-	}
-
-	body2, err := ioutil.ReadAll(resp2.Body)
-	if err != nil {
-		log.Fatal("ERROR body2: ", err.Error())
-	}
-
-	var res1 EnvelopeShot
-	err = xml.Unmarshal(body2, &res1)
-	if err != nil {
-		panic(err)
-	}
-
-	uri := res1.Body.GetSnapshotUriResponse.MediaUri.Uri
-
-	//переделываем адрес
-	url := remake(uri, xaddr)
-	fmt.Println(url)
-
-	//запрашиваем кадр
-	resp3, err := http.Get(url)
-	if err != nil {
-		log.Fatal("ERROR resp3: ", err.Error())
-	}
-
-	body3, err := ioutil.ReadAll(resp3.Body)
-	if err != nil {
-		log.Fatal("ERROR body3: ", err.Error())
-	}
-
-	fmt.Println(body3)
+	return res.Body.GetProfilesResponse, nil
 }
 
 func remake(uri, xaddr string) string {
